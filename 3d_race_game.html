@@ -1,0 +1,222 @@
+
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <title>3Dレースゲーム（音楽付き）</title>
+  <style>
+    body { margin: 0; overflow: hidden; background: black; }
+    #titleScreen {
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      background: black; color: white;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      font-family: sans-serif; z-index: 20;
+    }
+    #startButton {
+      font-size: 48px;
+      padding: 20px 40px;
+      margin-top: 40px;
+      background: white;
+      color: black;
+      border: 3px solid #444;
+      border-radius: 12px;
+      cursor: pointer;
+    }
+    #ui {
+      position: fixed;
+      bottom: 20px; left: 0; right: 0;
+      display: flex;
+      justify-content: center;
+      gap: 40px;
+      z-index: 10;
+    }
+    .btn {
+      font-size: 72px;
+      width: 120px;
+      height: 120px;
+      background: white;
+      border: 4px solid black;
+      border-radius: 20px;
+      line-height: 120px;
+      text-align: center;
+      user-select: none;
+      touch-action: none;
+    }
+    #scoreDisplay {
+      position: fixed;
+      top: 10px; left: 10px;
+      color: white;
+      font-size: 28px;
+      font-family: monospace;
+      z-index: 15;
+    }
+  </style>
+</head>
+<body>
+  <div id="titleScreen">
+    <h1>3Dレースゲーム</h1>
+    <div id="startButton">スタート</div>
+  </div>
+
+  <div id="scoreDisplay">SCORE: 0<br>HI: 0</div>
+
+  <div id="ui" style="display:none;">
+    <div class="btn" id="leftBtn">←</div>
+    <div class="btn" id="rightBtn">→</div>
+  </div>
+
+  <!-- 音源 -->
+  <audio id="startSound" src="https://cdn.pixabay.com/download/audio/2022/03/15/audio_4a6b197546.mp3?filename=arcade-start-2-185888.mp3" preload="auto"></audio>
+  <audio id="crashSound" src="https://cdn.pixabay.com/download/audio/2022/03/15/audio_f4e2c478ef.mp3?filename=arcade-explosion-2-185899.mp3" preload="auto"></audio>
+  <audio id="hiScoreSound" src="https://cdn.pixabay.com/download/audio/2022/03/15/audio_452e93e9a2.mp3?filename=arcade-score-185877.mp3" preload="auto"></audio>
+  <audio id="bgm" src="https://cdn.pixabay.com/download/audio/2022/03/15/audio_232d8531f6.mp3?filename=8-bit-adventure-134208.mp3" loop preload="auto"></audio>
+
+  <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+
+  <script>
+    let gameStarted = false;
+    let scene, camera, renderer, car, enemies = [];
+    let leftPressed = false, rightPressed = false;
+    const maxX = 2;
+    let score = 0;
+    let hiScore = localStorage.getItem("hiScore") || 0;
+    const scoreDisplay = document.getElementById("scoreDisplay");
+
+    function updateScore() {
+      scoreDisplay.innerHTML = `SCORE: ${score}<br>HI: ${hiScore}`;
+    }
+
+    function playSound(id) {
+      const sound = document.getElementById(id);
+      if (sound) {
+        sound.pause();
+        sound.currentTime = 0;
+        sound.play().catch(e => console.warn(`再生失敗 (${id}):`, e));
+      }
+    }
+
+    function initGame() {
+      scene = new THREE.Scene();
+      camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+      renderer = new THREE.WebGLRenderer();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      document.body.appendChild(renderer.domElement);
+
+      const geometry = new THREE.BoxGeometry(1, 0.5, 2);
+      const material = new THREE.MeshLambertMaterial({ color: 0x00ffff });
+      car = new THREE.Mesh(geometry, material);
+      car.position.set(0, 0.25, 0);
+      scene.add(car);
+
+      const road = new THREE.Mesh(
+        new THREE.BoxGeometry(5, 0.1, 200),
+        new THREE.MeshLambertMaterial({ color: 0x333333 })
+      );
+      road.position.set(0, 0, 100);
+      scene.add(road);
+
+      const light = new THREE.DirectionalLight(0xffffff, 1);
+      light.position.set(0, 5, 10);
+      scene.add(light);
+
+      setInterval(() => {
+        if (gameStarted) {
+          score++;
+          updateScore();
+        }
+      }, 1000);
+
+      animate();
+    }
+
+    function spawnEnemy() {
+      const geo = new THREE.BoxGeometry(1, 0.5, 2);
+      const mat = new THREE.MeshLambertMaterial({ color: 0xff0000 });
+      const enemy = new THREE.Mesh(geo, mat);
+      enemy.position.set((Math.random() - 0.5) * 4, 0.25, -50);
+      scene.add(enemy);
+      enemies.push(enemy);
+    }
+
+    function animate() {
+      requestAnimationFrame(animate);
+      if (!gameStarted) return;
+
+      if (leftPressed) car.position.x -= 0.1;
+      if (rightPressed) car.position.x += 0.1;
+      car.position.x = Math.max(-maxX, Math.min(maxX, car.position.x));
+
+      enemies.forEach(enemy => enemy.position.z += 0.5);
+      enemies = enemies.filter(enemy => {
+        if (enemy.position.z > car.position.z + 5) {
+          scene.remove(enemy);
+          return false;
+        }
+        const dx = Math.abs(enemy.position.x - car.position.x);
+        const dz = Math.abs(enemy.position.z - car.position.z);
+        if (dx < 1 && dz < 2) {
+          gameOver();
+          return false;
+        }
+        return true;
+      });
+
+      if (Math.random() < 0.02) spawnEnemy();
+
+      camera.position.set(car.position.x, 4, car.position.z + 6);
+      camera.lookAt(car.position);
+
+      renderer.render(scene, camera);
+    }
+
+    function gameOver() {
+      playSound("crashSound");
+      gameStarted = false;
+      if (score > hiScore) {
+        hiScore = score;
+        localStorage.setItem("hiScore", hiScore);
+        playSound("hiScoreSound");
+        alert(`🎉 New High Score: ${score}`);
+      } else {
+        alert(`Game Over\nScore: ${score}\nHigh Score: ${hiScore}`);
+      }
+      location.reload();
+    }
+
+    // ゲーム開始
+    document.getElementById("startButton").onclick = () => {
+      playSound("startSound");
+      playSound("bgm");
+      document.getElementById("titleScreen").style.display = "none";
+      document.getElementById("ui").style.display = "flex";
+      updateScore();
+      gameStarted = true;
+      initGame();
+    };
+
+    // 左右ボタン操作（スマホ・マウス）
+    const leftBtn = document.getElementById("leftBtn");
+    const rightBtn = document.getElementById("rightBtn");
+
+    leftBtn.addEventListener("touchstart", e => { e.preventDefault(); leftPressed = true; }, { passive: false });
+    leftBtn.addEventListener("touchend", e => { e.preventDefault(); leftPressed = false; }, { passive: false });
+    leftBtn.addEventListener("mousedown", () => leftPressed = true);
+    leftBtn.addEventListener("mouseup", () => leftPressed = false);
+
+    rightBtn.addEventListener("touchstart", e => { e.preventDefault(); rightPressed = true; }, { passive: false });
+    rightBtn.addEventListener("touchend", e => { e.preventDefault(); rightPressed = false; }, { passive: false });
+    rightBtn.addEventListener("mousedown", () => rightPressed = true);
+    rightBtn.addEventListener("mouseup", () => rightPressed = false);
+
+    // キーボード操作
+    document.addEventListener("keydown", e => {
+      if (e.key === "ArrowLeft") leftPressed = true;
+      if (e.key === "ArrowRight") rightPressed = true;
+    });
+    document.addEventListener("keyup", e => {
+      if (e.key === "ArrowLeft") leftPressed = false;
+      if (e.key === "ArrowRight") rightPressed = false;
+    });
+  </script>
+</body>
+</html>
